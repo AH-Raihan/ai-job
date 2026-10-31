@@ -136,9 +136,41 @@
             width: 0;
             z-index: 1;
         }
+
+        /* Red Siren Flashing Overlay & Screen Jitter for Panic Mode */
+        @keyframes sirenFlash {
+            0%, 100% { background-color: rgba(239, 68, 68, 0.0); box-shadow: inset 0 0 0px rgba(220, 38, 38, 0); }
+            50% { background-color: rgba(239, 68, 68, 0.22); box-shadow: inset 0 0 90px rgba(220, 38, 38, 0.65); }
+        }
+        @keyframes screenJitter {
+            0%, 100% { transform: translate(0, 0); }
+            25% { transform: translate(-2px, 1.5px); }
+            50% { transform: translate(2px, -1.5px); }
+            75% { transform: translate(-1.5px, -1px); }
+        }
+        .siren-overlay-active {
+            animation: sirenFlash 0.65s ease-in-out infinite;
+        }
+        .screen-jitter-active {
+            animation: screenJitter 0.25s ease-in-out infinite;
+        }
     </style>
 </head>
-<body class="min-h-screen flex flex-col justify-between text-gray-900 selection:bg-minionBlue selection:text-white">
+<body id="pageBody" class="min-h-screen flex flex-col justify-between text-gray-900 selection:bg-minionBlue selection:text-white">
+
+    <!-- Flashing Red Siren Overlay (Pointer Events None so UI stays clickable) -->
+    <div id="panicSirenOverlay" class="fixed inset-0 pointer-events-none z-30 hidden"></div>
+
+    <!-- Floating Calm Down / Stop Panic Banner (Shown when Panic Mode is active) -->
+    <div id="panicControlBanner" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-lg bg-red-600 text-white px-4 py-3 rounded-2xl comic-card flex items-center justify-between gap-3 animate-bounce">
+        <div class="flex items-center gap-2 text-xs sm:text-sm font-extrabold">
+            <span class="text-2xl">🚨</span>
+            <span>BEE-DOO! সাইরেন বাজছে! AI আপনার ল্যাপটপের দিকে তাকাচ্ছে!</span>
+        </div>
+        <button onclick="stopPanicMode()" class="comic-btn bg-minionYellow hover:bg-yellow-300 text-gray-900 font-extrabold px-3.5 py-2 rounded-xl text-xs sm:text-sm whitespace-nowrap shrink-0">
+            😌 প্যানিক থামান / Sound Off
+        </button>
+    </div>
 
     <!-- Top Warning Ticker / Banner -->
     <header class="bg-gray-900 text-minionYellow py-2.5 px-4 border-b-4 border-gray-900 shadow-md sticky top-0 z-40">
@@ -147,15 +179,18 @@
                 <span class="inline-block animate-bounce text-xl">🚨</span>
                 <span>ব্রেকিং নিউজ: চ্যাটজিপিটি এখন কলাও ছিলতে পারে! (Bello!)</span>
             </div>
-            <div class="flex items-center gap-2 sm:gap-3">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-2.5">
                 <button onclick="showDeveloperModal()" title="ডেভেলপার সম্পর্কে জানুন!" class="bg-white text-gray-900 font-extrabold px-3 py-1 rounded-full text-xs sm:text-sm comic-btn flex items-center gap-1.5 hover:bg-minionYellow transition-colors">
                     <span>👨‍💻</span> <span>Developed by <span class="text-minionBlue underline decoration-wavy">Raihan</span></span>
                 </button>
-                <button id="soundToggleBtn" onclick="toggleSound()" class="bg-minionYellow text-gray-900 font-bold px-3 py-1 rounded-full text-xs sm:text-sm comic-btn flex items-center gap-1.5 hover:bg-yellow-300">
-                    <span id="soundIcon">🔊</span> <span id="soundText">সাউন্ড চালু</span>
+                <button id="navPanicBtn" onclick="togglePanicMode()" class="bg-red-600 hover:bg-red-500 text-white font-extrabold px-3 py-1 rounded-full text-xs sm:text-sm comic-btn flex items-center gap-1.5 transition-colors">
+                    <span>🚨</span> <span id="navPanicText">প্যানিক মোড (Panic Mode) 🔊</span>
+                </button>
+                <button id="soundToggleBtn" onclick="toggleSound()" title="Mute / Unmute Audio" class="bg-minionYellow text-gray-900 font-bold px-3 py-1 rounded-full text-xs sm:text-sm comic-btn flex items-center gap-1 hover:bg-yellow-300">
+                    <span id="soundIcon">🔊</span> <span id="soundText" class="hidden sm:inline">সাউন্ড চালু</span>
                 </button>
                 <div class="bg-minionBlue text-white px-3 py-1 rounded-full text-xs sm:text-sm font-bold border-2 border-white flex items-center gap-1">
-                    🍌 কলা পয়েন্ট: <span id="bananaCount">0</span>
+                    🍌 কলা: <span id="bananaCount">0</span>
                 </div>
             </div>
         </div>
@@ -325,7 +360,7 @@
                     <button onclick="feedBanana()" class="comic-btn bg-minionDarkYellow hover:bg-yellow-400 text-gray-900 font-bold px-3.5 py-2 rounded-xl text-sm flex items-center gap-1.5">
                         🍌 কলা খাওয়ান (Bribe)
                     </button>
-                    <button onclick="togglePanicMode()" class="comic-btn bg-red-500 hover:bg-red-600 text-white font-bold px-3.5 py-2 rounded-xl text-sm flex items-center gap-1.5">
+                    <button id="cardPanicBtn" onclick="togglePanicMode()" class="comic-btn bg-red-500 hover:bg-red-600 text-white font-bold px-3.5 py-2 rounded-xl text-sm flex items-center gap-1.5">
                         😱 প্যানিক মোড!
                     </button>
                 </div>
@@ -509,41 +544,210 @@
         let bananaPoints = 0;
         let dodgeAttempts = 0;
         let isPanicMode = false;
-        let synth = null;
 
-        // Initialize Tone.js Synth safely on user interaction
-        function initAudio() {
-            if (!synth && typeof Tone !== 'undefined') {
-                synth = new Tone.Synth({
-                    oscillator: { type: "triangle" },
-                    envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2 }
-                }).toDestination();
+        // Rapid click tracker for Minion panic trigger
+        let minionClickTimestamps = [];
+
+        // --- Native Web Audio API Procedural Sound Engine ---
+        let audioCtx = null;
+        let panicLoopInterval = null;
+        let sirenOsc = null;
+        let sirenGain = null;
+        let sirenLfo = null;
+        let panicStep = 0;
+
+        function getAudioContext() {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) {
+                    audioCtx = new AudioContextClass();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        // Start looping background Panic Soundtrack (Wailing Siren + 8-Bit Chaos Arpeggio + "BEE-DOO" Horn)
+        function startPanicBackgroundAudio() {
+            if (!soundEnabled) return;
+            const ctx = getAudioContext();
+            if (!ctx) return;
+
+            stopPanicBackgroundAudio(); // Ensure no duplicate loops
+
+            try {
+                const now = ctx.currentTime;
+
+                // 1. Continuous Wailing Cartoon Siren ("Wee-Woo" frequency LFO modulation)
+                sirenOsc = ctx.createOscillator();
+                sirenGain = ctx.createGain();
+                sirenLfo = ctx.createOscillator();
+                const lfoGain = ctx.createGain();
+
+                sirenOsc.type = 'triangle';
+                sirenOsc.frequency.setValueAtTime(620, now);
+
+                sirenLfo.type = 'sine';
+                sirenLfo.frequency.setValueAtTime(2.2, now); // 2.2 cycles per second wail
+                lfoGain.gain.setValueAtTime(240, now); // Modulate +- 240Hz
+
+                sirenGain.gain.setValueAtTime(0.06, now);
+
+                sirenLfo.connect(lfoGain);
+                lfoGain.connect(sirenOsc.frequency);
+                sirenOsc.connect(sirenGain);
+                sirenGain.connect(ctx.destination);
+
+                sirenOsc.start(now);
+                sirenLfo.start(now);
+
+                // 2. Chaotic 8-Bit Arcade Arpeggio + Minion "BEE-DOO!" Two-Tone Horns
+                const panicNotes = [523.25, 659.25, 783.99, 1046.50, 987.77, 783.99, 659.25, 587.33];
+                panicStep = 0;
+
+                panicLoopInterval = setInterval(() => {
+                    if (!isPanicMode || !soundEnabled || !audioCtx) return;
+                    const t = audioCtx.currentTime;
+
+                    // Fast 8-bit chiptune square wave note
+                    const arpOsc = audioCtx.createOscillator();
+                    const arpGain = audioCtx.createGain();
+                    arpOsc.type = 'square';
+                    const noteFreq = panicNotes[panicStep % panicNotes.length];
+                    arpOsc.frequency.setValueAtTime(noteFreq, t);
+
+                    arpGain.gain.setValueAtTime(0.05, t);
+                    arpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+                    arpOsc.connect(arpGain);
+                    arpGain.connect(audioCtx.destination);
+                    arpOsc.start(t);
+                    arpOsc.stop(t + 0.13);
+
+                    // Every 4 steps, play a high-pitched Minion "BEE-DOO!" voice horn
+                    if (panicStep % 4 === 0) {
+                        const beeDooOsc = audioCtx.createOscillator();
+                        const beeDooGain = audioCtx.createGain();
+                        beeDooOsc.type = 'sawtooth';
+
+                        const isBee = (panicStep % 8 === 0);
+                        // "BEE" (high pitch 880Hz) vs "DOO" (lower pitch 587Hz)
+                        beeDooOsc.frequency.setValueAtTime(isBee ? 880 : 587.33, t);
+                        if (isBee) {
+                            beeDooOsc.frequency.linearRampToValueAtTime(930, t + 0.18);
+                        } else {
+                            beeDooOsc.frequency.linearRampToValueAtTime(540, t + 0.22);
+                        }
+
+                        beeDooGain.gain.setValueAtTime(0.08, t);
+                        beeDooGain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+
+                        beeDooOsc.connect(beeDooGain);
+                        beeDooGain.connect(audioCtx.destination);
+                        beeDooOsc.start(t);
+                        beeDooOsc.stop(t + 0.25);
+                    }
+
+                    panicStep++;
+                }, 150);
+            } catch (e) {
+                // Safeguard against browser autoplay policies
             }
         }
 
+        function stopPanicBackgroundAudio() {
+            if (panicLoopInterval) {
+                clearInterval(panicLoopInterval);
+                panicLoopInterval = null;
+            }
+            try {
+                if (sirenOsc) {
+                    sirenOsc.stop();
+                    sirenOsc.disconnect();
+                    sirenOsc = null;
+                }
+                if (sirenLfo) {
+                    sirenLfo.stop();
+                    sirenLfo.disconnect();
+                    sirenLfo = null;
+                }
+                if (sirenGain) {
+                    sirenGain.disconnect();
+                    sirenGain = null;
+                }
+            } catch (e) {}
+        }
+
+        // One-shot Comedic Sound Effects using Web Audio API
         function playSound(type) {
             if (!soundEnabled) return;
+            const ctx = getAudioContext();
+            if (!ctx) return;
+
             try {
-                initAudio();
-                if (Tone.context.state !== 'running') {
-                    Tone.context.resume();
-                }
-                const now = Tone.now();
+                const now = ctx.currentTime;
+
                 if (type === 'poke') {
-                    synth.triggerAttackRelease("G5", "16n", now);
-                    synth.triggerAttackRelease("C6", "16n", now + 0.08);
-                } else if (type === 'banana') {
-                    synth.triggerAttackRelease("C5", "16n", now);
-                    synth.triggerAttackRelease("E5", "16n", now + 0.07);
-                    synth.triggerAttackRelease("G5", "8n", now + 0.14);
+                    // Funny Pop / Blip sound
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(420, now);
+                    osc.frequency.exponentialRampToValueAtTime(980, now + 0.11);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.13);
                 } else if (type === 'dodge') {
-                    synth.triggerAttackRelease("A5", "32n", now);
+                    // Cartoon Boing / Spring jump sound
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.exponentialRampToValueAtTime(780, now + 0.18);
+                    osc.frequency.exponentialRampToValueAtTime(340, now + 0.26);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.27);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.28);
+                } else if (type === 'banana' || type === 'fanfare') {
+                    // Happy Victory Fanfare Arpeggio
+                    const notes = type === 'fanfare' ? [523.25, 659.25, 783.99, 1046.50] : [587.33, 783.99, 987.77];
+                    notes.forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                        gain.gain.setValueAtTime(0.16, now + idx * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.22);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + idx * 0.08);
+                        osc.stop(now + idx * 0.08 + 0.23);
+                    });
                 } else if (type === 'alarm') {
-                    synth.triggerAttackRelease("F5", "8n", now);
-                    synth.triggerAttackRelease("C5", "8n", now + 0.15);
+                    // Quick two-tone BEE-DOO alert
+                    [880, 587.33].forEach((freq, idx) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+                        gain.gain.setValueAtTime(0.12, now + idx * 0.14);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.13);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + idx * 0.14);
+                        osc.stop(now + idx * 0.14 + 0.14);
+                    });
                 }
             } catch (e) {
-                // Ignore audio errors if blocked by browser policy
+                // Ignore audio errors if blocked
             }
         }
 
@@ -551,7 +755,12 @@
             soundEnabled = !soundEnabled;
             document.getElementById('soundIcon').textContent = soundEnabled ? '🔊' : '🔇';
             document.getElementById('soundText').textContent = soundEnabled ? 'সাউন্ড চালু' : 'সাউন্ড বন্ধ';
-            if (soundEnabled) playSound('poke');
+            if (soundEnabled) {
+                playSound('poke');
+                if (isPanicMode) startPanicBackgroundAudio();
+            } else {
+                stopPanicBackgroundAudio();
+            }
         }
 
         // --- 1. Eye Tracking Logic (Minion Goggles follow cursor/touch) ---
@@ -616,12 +825,24 @@
             // Pop animation on speech bubble
             speech.classList.add('scale-105', 'bg-yellow-100');
             setTimeout(() => speech.classList.remove('scale-105', 'bg-yellow-100'), 200);
+
+            // Detect rapid clicks (3+ clicks within 2.2 seconds triggers Panic Mode!)
+            const now = Date.now();
+            minionClickTimestamps.push(now);
+            minionClickTimestamps = minionClickTimestamps.filter(t => now - t < 2200);
+            if (minionClickTimestamps.length >= 3 && !isPanicMode) {
+                minionClickTimestamps = [];
+                activatePanicMode('"BEE-DOO! এত গুতো দিচ্ছেন কেন?! AI চলে আসলো তো—পালাও!! 🚨😱"');
+            }
         }
 
         function feedBanana() {
             playSound('banana');
             bananaPoints++;
             document.getElementById('bananaCount').textContent = bananaPoints;
+            if (isPanicMode) {
+                stopPanicMode();
+            }
             setMinionMouth('happy');
 
             const speech = document.getElementById('minionSpeech');
@@ -638,25 +859,69 @@
             }
         }
 
-        function togglePanicMode() {
-            playSound('alarm');
-            isPanicMode = !isPanicMode;
+        function activatePanicMode(customSpeech) {
+            isPanicMode = true;
             const wrapper = document.getElementById('minionWrapper');
             const badge = document.getElementById('moodBadge');
             const speech = document.getElementById('minionSpeech');
+            const overlay = document.getElementById('panicSirenOverlay');
+            const banner = document.getElementById('panicControlBanner');
+            const pageBody = document.getElementById('pageBody');
+            const navPanicText = document.getElementById('navPanicText');
+            const cardPanicBtn = document.getElementById('cardPanicBtn');
 
+            wrapper.classList.add('minion-panic');
+            setMinionMouth('panic');
+            badge.textContent = 'MEGA PANIC!! 🚨🚨';
+            badge.classList.replace('bg-red-500', 'bg-purple-600');
+            speech.textContent = customSpeech || '"BEE-DOO BEE-DOO! 🚨 পালাও রে! AI রোবটরা ল্যাপটপ দখল করে ফেলছে!!"';
+
+            // Visual Siren Overlay & Screen Jitter
+            overlay.classList.remove('hidden');
+            overlay.classList.add('siren-overlay-active');
+            pageBody.classList.add('screen-jitter-active');
+            banner.classList.remove('hidden');
+
+            if (navPanicText) navPanicText.textContent = 'প্যানিক থামান (Stop) 🔇';
+            if (cardPanicBtn) cardPanicBtn.innerHTML = '😌 প্যানিক থামান!';
+
+            startPanicBackgroundAudio();
+        }
+
+        function stopPanicMode() {
+            isPanicMode = false;
+            stopPanicBackgroundAudio();
+
+            const wrapper = document.getElementById('minionWrapper');
+            const badge = document.getElementById('moodBadge');
+            const speech = document.getElementById('minionSpeech');
+            const overlay = document.getElementById('panicSirenOverlay');
+            const banner = document.getElementById('panicControlBanner');
+            const pageBody = document.getElementById('pageBody');
+            const navPanicText = document.getElementById('navPanicText');
+            const cardPanicBtn = document.getElementById('cardPanicBtn');
+
+            wrapper.classList.remove('minion-panic');
+            setMinionMouth('smirk');
+            badge.textContent = 'CHILL MODE 😎';
+            badge.classList.replace('bg-purple-600', 'bg-red-500');
+            speech.textContent = '"হুহ! সাইরেন বন্ধ করলাম। তবে AI কিন্তু তলে তলে ঠিকই কাজ সারছে 👀"';
+
+            overlay.classList.add('hidden');
+            overlay.classList.remove('siren-overlay-active');
+            pageBody.classList.remove('screen-jitter-active');
+            banner.classList.add('hidden');
+
+            if (navPanicText) navPanicText.textContent = 'প্যানিক মোড (Panic Mode) 🔊';
+            if (cardPanicBtn) cardPanicBtn.innerHTML = '😱 প্যানিক মোড!';
+        }
+
+        function togglePanicMode() {
             if (isPanicMode) {
-                wrapper.classList.add('minion-panic');
-                setMinionMouth('panic');
-                badge.textContent = 'MEGA PANIC!! 🚨🚨';
-                badge.classList.replace('bg-red-500', 'bg-purple-600');
-                speech.textContent = '"BEE-DOO BEE-DOO! 🚨 পালাও রে! AI রোবটরা ল্যাপটপ দখল করে ফেলছে!!"';
+                stopPanicMode();
+                playSound('poke');
             } else {
-                wrapper.classList.remove('minion-panic');
-                setMinionMouth('smirk');
-                badge.textContent = 'CHILL MODE 😎';
-                badge.classList.replace('bg-purple-600', 'bg-red-500');
-                speech.textContent = '"হুহ! একটু অভিনয় করছিলাম আরকি। AI কিন্তু তলে তলে ঠিকই কাজ সারছে 👀"';
+                activatePanicMode();
             }
         }
 
@@ -670,8 +935,6 @@
             const inputEl = document.getElementById('jobInput');
             const rawJob = inputEl.value.trim();
             const jobTitle = rawJob || 'নামহীন রহস্যময় বেকার';
-
-            playSound('poke');
 
             const resultBox = document.getElementById('jobResultBox');
             const titleEl = document.getElementById('resultJobTitle');
@@ -690,16 +953,22 @@
                 dangerScore = 0;
                 barColor = 'bg-green-500';
                 verdict = '👑 আরে বাহ! আপনি তো এই সাইটের নির্মাতা রায়হান বস! AI আপনার চাকরি খাবে কী, AI নিজেই তো আপনার কাছে অটোগ্রাফ নিতে লাইনে দাঁড়িয়ে আছে! 😎🍌';
+                if (isPanicMode) stopPanicMode();
+                playSound('fanfare');
                 setMinionMouth('happy');
             } else if (lower.includes('ফুচকা') || lower.includes('চটপটি') || lower.includes('চা') || lower.includes('কাচ্চি') || lower.includes('বিরিয়ানি')) {
                 dangerScore = 2;
                 barColor = 'bg-green-500';
                 verdict = '🫡 স্যালুট বস! চ্যাটজিপিটি যতই স্মার্ট হোক, তেঁতুলের টক আর কাঁচামরিচ মাখাতে গেলে তার মাদারবোর্ড শর্ট সার্কিট হয়ে যাবে! আপনার চাকরি ১০০% নিরাপদ!';
+                if (isPanicMode) stopPanicMode();
+                playSound('fanfare');
                 setMinionMouth('happy');
             } else if (lower.includes('ঘুম') || lower.includes('বেকার') || lower.includes('sleep') || lower.includes('ভবঘুরে')) {
                 dangerScore = 0;
                 barColor = 'bg-blue-500';
                 verdict = '😎 যার চাকরিই নেই, তার চাকরি খাবে কে?! আপনি তো AI-কেই বোকা বানিয়ে দিয়েছেন! আরামে কম্বল মুড়ি দিয়ে ঘুমান।';
+                if (isPanicMode) stopPanicMode();
+                playSound('fanfare');
                 setMinionMouth('smirk');
             } else if (lower.includes('কোড') || lower.includes('সফটওয়্যার') || lower.includes('প্রোগ্রামার') || lower.includes('developer') || lower.includes('engineer')) {
                 dangerScore = 96;
@@ -718,7 +987,7 @@
                 setMinionMouth('panic');
             } else {
                 // Fun random high score for any custom entry
-                dangerScore = Math.floor(Math.random() * 25) + 73;
+                dangerScore = Math.floor(Math.random() * 25) + 75;
                 barColor = 'bg-red-500';
                 verdict = `👀 আমাদের মিনিয়ন রাডার বলছে "${jobTitle}" পেশার পেছনেও AI তলে তলে নজর দিয়েছে! প্রতিদিন মিনিয়নকে ২টা করে কলা ঘুষ দিন, নইলে বিপদ! 🍌`;
                 setMinionMouth('smirk');
@@ -731,6 +1000,11 @@
                 barEl.style.width = `${dangerScore}%`;
             }, 50);
             verdictEl.textContent = verdict;
+
+            // Automatically trigger Panic Mode & Siren Audio when risk score >= 75%
+            if (dangerScore >= 75) {
+                activatePanicMode(`"BEE-DOO! 🚨 সর্বনাশ! ${jobTitle}-এর ঝুঁকি ${dangerScore}%! তাড়াতাড়ি কলা খান নইলে চাকরি শেষ!!"`);
+            }
         }
 
         // --- 4. Runaway "Save My Job" Button ---
@@ -753,6 +1027,11 @@
             playSound('dodge');
             dodgeAttempts++;
             document.getElementById('dodgeCount').textContent = dodgeAttempts;
+
+            // Automatically trigger Panic Mode if user tries 3+ times to catch the button
+            if (dodgeAttempts === 3 && !isPanicMode) {
+                activatePanicMode('"BEE-DOO! 🚨 ৩ বার চেষ্টা করেও চাকরি ধরতে পারছেন না! প্যানিক সাইরেন বেজে গেছে!!"');
+            }
 
             const btn = document.getElementById('runawayBtn');
             const arena = document.getElementById('runawayArena');
@@ -777,7 +1056,8 @@
         }
 
         function caughtRunawayButton() {
-            playSound('banana');
+            if (isPanicMode) stopPanicMode();
+            playSound('fanfare');
             const btn = document.getElementById('runawayBtn');
             btn.style.transform = 'translate(0px, 0px) rotate(0deg)';
             btn.textContent = 'চাকরি আপাতত সেফ! 🎉';
@@ -839,7 +1119,8 @@
         }
 
         function showDeveloperModal() {
-            playSound('banana');
+            if (isPanicMode) stopPanicMode();
+            playSound('fanfare');
             setMinionMouth('happy');
             const speech = document.getElementById('minionSpeech');
             speech.textContent = '"Bello! আমাদের বস Raihan ভাইকে স্যালুট দিন! 🫡🍌"';
